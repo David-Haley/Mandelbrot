@@ -1,0 +1,12 @@
+name = "mandelbrot"
+description = "Shiny new project"
+version = "0.1.0-dev"
+
+authors = ["David Joseph Haley"]
+maintainers = ["David Joseph Haley <david.haley@bigpond.com>"]
+maintainers-logins = ["David-Haley"]
+
+executables = ["mandelbrot"]
+
+[[depends-on]]
+gtkada = "^24"

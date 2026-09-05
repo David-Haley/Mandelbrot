@@ -1,3 +1,6 @@
+with "gtkada.gpr";
+with "config/mandelbrot_config.gpr";
+
 project Mandelbrot is
 
    for Languages    use ("Ada");

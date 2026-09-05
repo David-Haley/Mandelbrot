@@ -2,6 +2,11 @@
 obj/
 bin/
 
+# Alire-managed dependencies and generated config
+/alire/cache/
+/alire/build/
+/config/
+
 # Compiled/binary output
 *.o
 *.ali
@@ -12,3 +17,4 @@ bin/
 *~
 .*.swp
 .DS_Store
+.claude/
