@@ -1,0 +1,14 @@
+# GNAT build artifacts
+obj/
+bin/
+
+# Compiled/binary output
+*.o
+*.ali
+*.ld
+*.exe
+
+# Editor/OS cruft
+*~
+.*.swp
+.DS_Store
