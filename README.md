@@ -2,6 +2,8 @@
 
 A GtkAda GUI for exploring the Mandelbrot set, written in Ada.
 
+![Mandelbrot screenshot](docs/screenshot.png)
+
 ## Features
 
 - Renders a 1024x1024 Mandelbrot set into a `Display_Buffer`, coloured with
