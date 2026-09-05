@@ -43,17 +43,17 @@ type Display_Buffers is array (Display_Indices, Display_Indices) of
         Real (Display_Indices'Last);
       C : Complex;
 
-      function Diverge (C_In : in Complex) return Colour_Insdices is
+      function Diverge (C : in Complex) return Colour_Insdices is
 
-         C : Complex := C_In;
+         Z : Complex := (0.0, 0.0);
          Limit : constant Real := 2.0;
          Result : Colour_Insdices := Colour_Insdices'First;
 
       begin -- Diverge
-         while Modulus (C) < Limit and Result < Colour_Insdices'Last loop
-            C := C ** 2 + C;
+         while Modulus (Z) < Limit and Result < Colour_Insdices'Last loop
+            Z := Z ** 2 + C;
             Result := @ + 1;
-         end loop; -- Modulus (C) < Limit and Result < Colour_Insdices'Last
+         end loop; -- Modulus (Z) < Limit and Result < Colour_Insdices'Last
          return Result;
       end Diverge;
 
