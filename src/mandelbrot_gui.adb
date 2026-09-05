@@ -8,16 +8,27 @@ with Interfaces; use Interfaces;
 with Ada.Text_IO;
 with Ada.Strings; use Ada.Strings;
 with Ada.Strings.Fixed;
+with System;
 
 with Glib; use Glib;
+with Glib.Error; use Glib.Error;
+with Glib.Object; use Glib.Object;
+with Gtkada.Types; use Gtkada.Types;
 with Gtk.Window; use Gtk.Window;
 with Gtk.Widget; use Gtk.Widget;
 with Gtk.Box; use Gtk.Box;
 with Gtk.Label; use Gtk.Label;
+with Gtk.Button; use Gtk.Button;
+with Gtk.Dialog; use Gtk.Dialog;
+with Gtk.File_Chooser; use Gtk.File_Chooser;
+with Gtk.File_Chooser_Dialog; use Gtk.File_Chooser_Dialog;
+with Gtk.File_Filter; use Gtk.File_Filter;
+with Gtk.Message_Dialog; use Gtk.Message_Dialog;
 with Gtk.Drawing_Area; use Gtk.Drawing_Area;
 with Gtk.Enums; use Gtk.Enums;
 with Gtk.Main;
 with Gdk.Event; use Gdk.Event;
+with Gdk.Pixbuf; use Gdk.Pixbuf;
 with Cairo; use Cairo;
 with Cairo.Image_Surface; use Cairo.Image_Surface;
 with Cairo.Surface;
@@ -147,6 +158,7 @@ package body Mandelbrot_GUI is
    Window : Gtk_Window;
    Drawing_Area : Gtk_Drawing_Area;
    Corner_Label : Gtk_Label;
+   Save_Button : Gtk_Button;
 
    --  Mouse-driven area selection. A left-button drag defines the diagonal
    --  of a square (the drag is forced square, and clamped to the display),
@@ -226,6 +238,112 @@ package body Mandelbrot_GUI is
          "Drag the left mouse button over the image to zoom into a" &
          " selected area.");
    end Update_Label;
+
+   function Save_Pixbuf_With_Metadata
+     (Pixbuf : in Gdk_Pixbuf; Filename : in String;
+      Bottom_Left_Text, Top_Right_Text : in String) return Boolean is
+
+      -- gdk_pixbuf_savev is not bound by GtkAda, so it is imported directly
+      -- here in order to pass the corner coordinates as PNG tEXt chunks
+      -- (option keys of the form "tEXt::<keyword>").
+
+      function Internal_Savev
+        (Pixbuf        : System.Address;
+         Filename      : String;
+         Format        : String;
+         Option_Keys   : Chars_Ptr_Array;
+         Option_Values : Chars_Ptr_Array;
+         Error         : out Glib.Error.GError) return Gboolean;
+      pragma Import (C, Internal_Savev, "gdk_pixbuf_savev");
+
+      Keys : Chars_Ptr_Array :=
+        "tEXt::Bottom_Left" + "tEXt::Top_Right" + Null_Ptr;
+      Values : Chars_Ptr_Array :=
+        Bottom_Left_Text + Top_Right_Text + Null_Ptr;
+      Error : Glib.Error.GError;
+      Result : Gboolean;
+
+   begin -- Save_Pixbuf_With_Metadata
+      Result := Internal_Savev (Get_Object (Pixbuf), Filename & ASCII.NUL,
+                                 "png" & ASCII.NUL, Keys, Values, Error);
+      Free (Keys);
+      Free (Values);
+      if Result = 0 then
+         if Error /= null then
+            Ada.Text_IO.Put_Line (Ada.Text_IO.Standard_Error,
+              "Failed to save " & Filename & ": " &
+              Glib.Error.Get_Message (Error));
+         end if;
+      end if;
+      return Result /= 0;
+   end Save_Pixbuf_With_Metadata;
+
+   procedure On_Save_Clicked (Self : access Gtk_Button_Record'Class) is
+
+      pragma Unreferenced (Self);
+
+      Dialog : Gtk_File_Chooser_Dialog;
+      Filter : Gtk_File_Filter;
+      Response : Gtk_Response_Type;
+      Discard_Widget : Gtk.Widget.Gtk_Widget;
+      pragma Unreferenced (Discard_Widget);
+
+   begin -- On_Save_Clicked
+      Gtk_New (Dialog, "Save as PNG", Window, Action_Save);
+      Discard_Widget := Dialog.Add_Button ("Cancel", Gtk_Response_Cancel);
+      Discard_Widget := Dialog.Add_Button ("Save", Gtk_Response_Accept);
+      Dialog.Set_Current_Name ("mandelbrot.png");
+
+      Gtk_New (Filter);
+      Filter.Set_Name ("PNG images");
+      Filter.Add_Pattern ("*.png");
+      Dialog.Add_Filter (Filter);
+
+      Response := Dialog.Run;
+      if Response = Gtk_Response_Accept then
+         declare
+
+            Chosen_Name : constant String := Dialog.Get_Filename;
+
+            Filename : constant String :=
+              (if Chosen_Name'Length >= 4 and then
+                  Chosen_Name (Chosen_Name'Last - 3 .. Chosen_Name'Last) =
+                  ".png"
+               then Chosen_Name else Chosen_Name & ".png");
+
+            Pixbuf : constant Gdk_Pixbuf :=
+              Get_From_Surface (Surface, 0, 0, Gint (Image_Size),
+                                 Gint (Image_Size));
+
+            Bottom_Left_Text : constant String :=
+              "Bottom Left: (" & Format (Bottom_Left.Re) & ", " &
+              Format (Bottom_Left.Im) & ")";
+
+            Top_Right_Text : constant String :=
+              "Top Right: (" & Format (Top_Right.Re) & ", " &
+              Format (Top_Right.Im) & ")";
+
+            Saved : Boolean;
+
+         begin
+            Saved := Save_Pixbuf_With_Metadata
+              (Pixbuf, Filename, Bottom_Left_Text, Top_Right_Text);
+            if not Saved then
+               declare
+                  Error_Dialog : Gtk_Message_Dialog;
+                  Error_Response : Gtk_Response_Type;
+                  pragma Unreferenced (Error_Response);
+               begin
+                  Gtk_New (Error_Dialog, Window, Modal, Message_Error,
+                           Buttons_Close, "Failed to save " & Filename);
+                  Error_Response := Error_Dialog.Run;
+                  Error_Dialog.Destroy;
+               end;
+            end if;
+         end;
+      end if;
+      Dialog.Destroy;
+   end On_Save_Clicked;
 
    procedure Recalculate (New_Bottom_Left, New_Top_Right : in Complex) is
 
@@ -353,6 +471,9 @@ package body Mandelbrot_GUI is
       Gtk_New (Corner_Label);
       Update_Label;
 
+      Gtk_New (Save_Button, "Save as PNG...");
+      Save_Button.On_Clicked (On_Save_Clicked'Access);
+
       Gtk_New (Drawing_Area);
       Drawing_Area.Set_Size_Request (Gint (Image_Size), Gint (Image_Size));
       Drawing_Area.Add_Events
@@ -364,6 +485,7 @@ package body Mandelbrot_GUI is
 
       Gtk_New (Vbox, Orientation_Vertical, 0);
       Vbox.Pack_Start (Corner_Label, Expand => False, Fill => False);
+      Vbox.Pack_Start (Save_Button, Expand => False, Fill => False);
       Vbox.Pack_Start (Drawing_Area, Expand => True, Fill => True);
 
       Window.Add (Vbox);
