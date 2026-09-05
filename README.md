@@ -42,7 +42,6 @@ bin/mandelbrot
 - `src/mandelbrot.adb` — entry point; delegates to `Mandelbrot_GUI.Run`.
 - `src/mandelbrot_gui.ads` / `.adb` — the GUI: Mandelbrot generation,
   colour palette, rendering, mouse-driven selection, and PNG export.
-- `Instructions.txt` — the original task brief this project implements.
 
 ## License
 
