@@ -24,18 +24,18 @@ with Cairo.Surface;
 
 package body Mandelbrot_GUI is
 
-type Real is digits 15;
+   type Real is digits 15;
 
-package Complex_Numbers is new Ada.Numerics.Generic_Complex_Types (Real);
-use Complex_Numbers;
+   package Complex_Numbers is new Ada.Numerics.Generic_Complex_Types (Real);
+   use Complex_Numbers;
 
-subtype Colour_Insdices is Unsigned_8;
-subtype Display_Indices is Natural range 0 .. 1023;
+   subtype Colour_Insdices is Unsigned_8 range 0 .. 64;
+   subtype Display_Indices is Natural range 0 .. 1023;
 
-Image_Size : constant := Display_Indices'Last - Display_Indices'First + 1;
+   Image_Size : constant := Display_Indices'Last - Display_Indices'First + 1;
 
-type Display_Buffers is array (Display_Indices, Display_Indices) of
-  Colour_Insdices;
+   type Display_Buffers is array (Display_Indices, Display_Indices) of
+      Colour_Insdices;
 
    procedure Generate_Set (Bottom_Left, Top_Right : in Complex;
                            Display_Buffer : out Display_Buffers)
@@ -57,6 +57,9 @@ type Display_Buffers is array (Display_Indices, Display_Indices) of
          Result : Colour_Insdices := Colour_Insdices'First;
 
       begin -- Diverge
+         if Modulus (C) >= Limit then
+            return Result;
+         end if; -- Modulus (C) >= Limit
          while Modulus (Z) < Limit and Result < Colour_Insdices'Last loop
             Z := Z ** 2 + C;
             Result := @ + 1;
@@ -85,7 +88,8 @@ type Display_Buffers is array (Display_Indices, Display_Indices) of
 
       function Hue_To_RGB (Index : Colour_Insdices) return RGB24_Data is
 
-         Hue : constant Float := 360.0 * Float (Index) / 255.0;
+         Hue : constant Float :=
+           360.0 * Float (Index) / Float (Colour_Insdices'Last);
          Sector_Position : constant Float := Hue / 60.0;
          Sector : constant Natural :=
            Natural (Float'Floor (Sector_Position)) mod 6;
