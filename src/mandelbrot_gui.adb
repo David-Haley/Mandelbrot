@@ -315,12 +315,15 @@ package body Mandelbrot_GUI is
 
    procedure Recalculate (New_Bottom_Left, New_Top_Right : in Complex) is
 
+      Old_Bottom_Left : constant Complex := Bottom_Left;
+      Old_Top_Right : constant Complex := Top_Right;
+
    begin -- Recalculate
-      Previous_Bottom_Left := Bottom_Left;
-      Previous_Top_Right := Top_Right;
-      Previous_Button.Set_Sensitive (True);
       Bottom_Left := New_Bottom_Left;
       Top_Right := New_Top_Right;
+      Previous_Bottom_Left := Old_Bottom_Left;
+      Previous_Top_Right := Old_Top_Right;
+      Previous_Button.Set_Sensitive (True);
       Generate_Set (Bottom_Left, Top_Right);
       Render_Buffer;
       Update_Label;
