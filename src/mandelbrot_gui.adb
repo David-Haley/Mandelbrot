@@ -526,6 +526,9 @@ package body Mandelbrot_GUI is
       Selection_OK_Button.On_Clicked (On_Selection_OK_Clicked'Access);
       Selection_OK_Button.Set_Sensitive (False);
 
+      Gtk_New (Save_Button, "Save as PNG...");
+      Save_Button.On_Clicked (On_Save_Clicked'Access);
+
       Gtk_New (Selection_Box, Orientation_Horizontal, 0);
       Selection_Box.Pack_Start
         (Reset_Button, Expand => False, Fill => False);
@@ -535,9 +538,7 @@ package body Mandelbrot_GUI is
         (Cancel_Button, Expand => False, Fill => False);
       Selection_Box.Pack_Start
         (Selection_OK_Button, Expand => False, Fill => False);
-
-      Gtk_New (Save_Button, "Save as PNG...");
-      Save_Button.On_Clicked (On_Save_Clicked'Access);
+      Selection_Box.Pack_End (Save_Button, Expand => False, Fill => False);
 
       Gtk_New (Drawing_Area);
       Drawing_Area.Set_Size_Request (Gint (Image_Size), Gint (Image_Size));
@@ -551,7 +552,6 @@ package body Mandelbrot_GUI is
       Gtk_New (Vbox, Orientation_Vertical, 0);
       Vbox.Pack_Start (Corner_Label, Expand => False, Fill => False);
       Vbox.Pack_Start (Selection_Box, Expand => False, Fill => False);
-      Vbox.Pack_Start (Save_Button, Expand => False, Fill => False);
       Vbox.Pack_Start (Drawing_Area, Expand => True, Fill => True);
 
       Window.Add (Vbox);
