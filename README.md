@@ -18,8 +18,13 @@ A GtkAda GUI for exploring the Mandelbrot set, written in Ada.
   - **Undo** / **Redo** — step backward/forward through the full history
     of views (both Reset Selection and Selection OK add an entry).
 - **Help** button describing all of the above, plus the build date.
-- "Save as PNG..." writes the currently displayed image to a PNG file,
-  embedding the corner coordinates as `tEXt` metadata chunks.
+- A **File** menu:
+  - **Save as PNG...** writes the currently displayed image to a PNG
+    file, embedding the corner coordinates as `tEXt` metadata chunks.
+  - **Save History...** writes the view history to a JSON file.
+  - **Load History...** replaces the view history from a JSON file.
+  - **Replay...** steps through the loaded history automatically, at an
+    interval you choose.
 
 ## Requirements
 
@@ -53,7 +58,8 @@ bin/mandelbrot
   across four persistent Ada tasks.
 - `src/mandelbrot_gui.ads` / `.adb` — the GUI: colour palette, Cairo
   rendering, mouse-driven selection and its confirmation buttons, the
-  Help dialog, and PNG export.
+  Help dialog, and the File menu (PNG export, JSON history save/load,
+  replay).
 
 ## License
 
