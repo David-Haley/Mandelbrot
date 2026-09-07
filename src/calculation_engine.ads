@@ -34,11 +34,11 @@ package Calculation_Engine is
 
    procedure End_Tasks;
 
-   -- Causes the calculation tasks to terminate.
-   
+   --  Causes the calculation tasks to terminate.
+
 private
 
    Cores : constant Positive := 4; -- must be 2**n
    subtype Calculator_Indices is Natural range 0 .. Cores - 1;
-   
+
 end Calculation_Engine;

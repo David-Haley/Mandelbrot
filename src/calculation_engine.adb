@@ -45,7 +45,7 @@ package body Calculation_Engine is
    end End_Tasks;
 
    task body Calculators is
-   
+
       function C_Value (Bottom_Left : in Complex;
                         M : in Real;
                         X, Y : in Display_Indices) return Complex
@@ -116,6 +116,6 @@ package body Calculation_Engine is
             --  and wasting CPU time
          end select;
       end loop; -- Run
-   end Calculators; 
+   end Calculators;
 
 end Calculation_Engine;
