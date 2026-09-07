@@ -1,14 +1,18 @@
 --  GtkAda user interface for displaying the Mandelbrot Display_Buffer.
 --  Author    : David Haley
 --  Created   : 05/09/2026
---  Last Edit : 05/09/2026
+--  Last Edit : 07/09/2026
 
-with Ada.Numerics.Generic_Complex_Types;
-with Interfaces; use Interfaces;
+--  20260907 : Set calculation moved to Calculation_Engine, now uses multiple
+--  cores.
+
 with Ada.Text_IO;
 with Ada.Strings; use Ada.Strings;
 with Ada.Strings.Fixed;
 with System;
+with Calculation_Engine; use Calculation_Engine;
+with Interfaces; use Interfaces;
+use Calculation_Engine.Complex_Numbers;
 
 with Glib; use Glib;
 with Glib.Error; use Glib.Error;
@@ -35,72 +39,22 @@ with Cairo.Surface;
 
 package body Mandelbrot_GUI is
 
-   type Real is digits 15;
-
-   package Complex_Numbers is new Ada.Numerics.Generic_Complex_Types (Real);
-   use Complex_Numbers;
-
-   subtype Colour_Insdices is Unsigned_8 range 0 .. 64;
-   subtype Display_Indices is Natural range 0 .. 1023;
-
    Image_Size : constant := Display_Indices'Last - Display_Indices'First + 1;
-
-   type Display_Buffers is array (Display_Indices, Display_Indices) of
-      Colour_Insdices;
-
-   procedure Generate_Set (Bottom_Left, Top_Right : in Complex;
-                           Display_Buffer : out Display_Buffers)
-     with Pre => Top_Right.Re > Bottom_Left.Re and
-                 Top_Right.Im > Bottom_Left.Im and
-                 (Top_Right.Re - Bottom_Left.Re) =
-                 (Top_Right.Im - Bottom_Left.Im) is
-
-      --  That is Bottom_Left and Top_Right define the corners of a square.
-
-      M : constant Real := (Top_Right.Re - Bottom_Left.Re) /
-        Real (Display_Indices'Last);
-      C : Complex;
-
-      function Diverge (C : in Complex) return Colour_Insdices is
-
-         Z : Complex := (0.0, 0.0);
-         Limit : constant Real := 2.0;
-         Result : Colour_Insdices := Colour_Insdices'First;
-
-      begin -- Diverge
-         if Modulus (C) >= Limit then
-            return Result;
-         end if; -- Modulus (C) >= Limit
-         while Modulus (Z) < Limit and Result < Colour_Insdices'Last loop
-            Z := Z ** 2 + C;
-            Result := @ + 1;
-         end loop; -- Modulus (Z) < Limit and Result < Colour_Insdices'Last
-         return Result;
-      end Diverge;
-
-   begin -- Generate_Set
-      for X in Display_Indices loop
-         for Y in Display_Indices loop
-            C := Bottom_Left + (M * Real (X), M * Real (Y));
-            Display_Buffer (X, Y) := Diverge (C);
-         end loop; -- Y in Display_Indices
-      end loop; -- X in Display_Indices
-   end Generate_Set;
 
    --  Colour_Indices 0 .. 254 are mapped to vivid, fully saturated colours
    --  around the hue wheel; 255 (the point never diverged) is displayed as
    --  black.
 
-   type Palette_Arrays is array (Colour_Insdices) of RGB24_Data;
+   type Palette_Arrays is array (Colour_Indices) of RGB24_Data;
 
    function Build_Palette return Palette_Arrays is
 
       Palette : Palette_Arrays;
 
-      function Hue_To_RGB (Index : Colour_Insdices) return RGB24_Data is
+      function Hue_To_RGB (Index : Colour_Indices) return RGB24_Data is
 
          Hue : constant Float :=
-           360.0 * Float (Index) / Float (Colour_Insdices'Last);
+           360.0 * Float (Index) / Float (Colour_Indices'Last);
          Sector_Position : constant Float := Hue / 60.0;
          Sector : constant Natural :=
            Natural (Float'Floor (Sector_Position)) mod 6;
@@ -135,13 +89,13 @@ package body Mandelbrot_GUI is
       end Hue_To_RGB;
 
    begin -- Build_Palette
-      for I in Colour_Insdices loop
-         if I = Colour_Insdices'Last then
+      for I in Colour_Indices loop
+         if I = Colour_Indices'Last then
             Palette (I) := (Red => 0, Green => 0, Blue => 0);
          else
             Palette (I) := Hue_To_RGB (I);
          end if;
-      end loop; -- I in Colour_Insdices
+      end loop; -- I in Colour_Indices
       return Palette;
    end Build_Palette;
 
@@ -152,7 +106,6 @@ package body Mandelbrot_GUI is
 
    Bottom_Left : Complex;
    Top_Right : Complex;
-   Display_Buffer : Display_Buffers;
    Surface : Cairo_Surface;
 
    Window : Gtk_Window;
@@ -350,7 +303,7 @@ package body Mandelbrot_GUI is
    begin -- Recalculate
       Bottom_Left := New_Bottom_Left;
       Top_Right := New_Top_Right;
-      Generate_Set (Bottom_Left, Top_Right, Display_Buffer);
+      Generate_Set (Bottom_Left, Top_Right);
       Render_Buffer;
       Update_Label;
       Drawing_Area.Queue_Draw;
@@ -459,7 +412,7 @@ package body Mandelbrot_GUI is
 
       Surface := Create_For_Data_RGB24 (Pixel_Data, Gint (Image_Size),
                                          Gint (Image_Size));
-      Generate_Set (Bottom_Left, Top_Right, Display_Buffer);
+      Generate_Set (Bottom_Left, Top_Right);
       Render_Buffer;
 
       Gtk.Main.Init;
@@ -493,6 +446,7 @@ package body Mandelbrot_GUI is
 
       Window.Show_All;
       Gtk.Main.Main;
+      End_Tasks;
    end Run;
 
 end Mandelbrot_GUI;
