@@ -121,6 +121,7 @@ package body Mandelbrot_GUI is
    Drawing_Area : Gtk_Drawing_Area;
    Corner_Label : Gtk_Label;
    Save_Button : Gtk_Button;
+   Help_Button : Gtk_Button;
    Reset_Button : Gtk_Button;
    Previous_Button : Gtk_Button;
    Cancel_Button : Gtk_Button;
@@ -204,9 +205,8 @@ package body Mandelbrot_GUI is
          Format (Bottom_Left.Im) & ")   Top Right: (" &
          Format (Top_Right.Re) & ", " & Format (Top_Right.Im) & ")" &
          ASCII.LF &
-         "Drag the left mouse button over the image to select an area," &
-         " then click Selection OK to zoom in, or Cancel Selection to" &
-         " discard it.");
+         "Drag the left mouse button over the image to select an area." &
+         "  See Help for the buttons below.");
    end Update_Label;
 
    function Save_Pixbuf_With_Metadata
@@ -488,6 +488,29 @@ package body Mandelbrot_GUI is
       end if;
    end On_Selection_OK_Clicked;
 
+   procedure On_Help_Clicked (Self : access Gtk_Button_Record'Class) is
+
+      pragma Unreferenced (Self);
+
+      Dialog : Gtk_Message_Dialog;
+      Response : Gtk_Response_Type;
+      pragma Unreferenced (Response);
+
+   begin -- On_Help_Clicked
+      Gtk_New
+        (Dialog, Window, Modal, Message_Info, Buttons_Close,
+         "Drag the left mouse button over the image to select a square" &
+         " area, then use the buttons below:" & ASCII.LF & ASCII.LF &
+         "Selection OK: zoom into the selected area." & ASCII.LF &
+         "Cancel Selection: discard the current selection." & ASCII.LF &
+         "Reset Selection: return to the full initial view." & ASCII.LF &
+         "Previous Selection: return to the previous view." & ASCII.LF &
+         "Save as PNG...: save the current image, with the corner" &
+         " coordinates embedded as metadata.");
+      Response := Dialog.Run;
+      Dialog.Destroy;
+   end On_Help_Clicked;
+
    procedure Run is
 
       Vbox : Gtk_Box;
@@ -529,6 +552,9 @@ package body Mandelbrot_GUI is
       Gtk_New (Save_Button, "Save as PNG...");
       Save_Button.On_Clicked (On_Save_Clicked'Access);
 
+      Gtk_New (Help_Button, "Help");
+      Help_Button.On_Clicked (On_Help_Clicked'Access);
+
       Gtk_New (Selection_Box, Orientation_Horizontal, 0);
       Selection_Box.Pack_Start
         (Reset_Button, Expand => False, Fill => False);
@@ -538,6 +564,10 @@ package body Mandelbrot_GUI is
         (Cancel_Button, Expand => False, Fill => False);
       Selection_Box.Pack_Start
         (Selection_OK_Button, Expand => False, Fill => False);
+      --  Pack_End places each new child further from the box's end than
+      --  the previous one, so Help_Button (packed first) ends up at the
+      --  far right with Save_Button to its left.
+      Selection_Box.Pack_End (Help_Button, Expand => False, Fill => False);
       Selection_Box.Pack_End (Save_Button, Expand => False, Fill => False);
 
       Gtk_New (Drawing_Area);
