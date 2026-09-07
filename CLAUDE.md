@@ -19,36 +19,57 @@ regenerated content.
 
 - `src/mandelbrot.adb` is a thin entry point that only calls
   `Mandelbrot_GUI.Run`.
-- `src/mandelbrot_gui.ads`/`.adb` hold everything else: Mandelbrot
-  generation, the colour palette, Cairo rendering, mouse-driven selection,
-  and PNG export. All GUI state (`Bottom_Left`, `Top_Right`,
-  `Display_Buffer`, `Surface`, the widgets) is declared at package-body
-  level, not inside `Run`.
+- `src/calculation_engine.ads`/`.adb` compute the Mandelbrot set across
+  four persistent Ada tasks (`Calculators`, each striping rows via
+  `Y := Y + Cores`). `Generate_Set` starts all four and blocks until each
+  reports idle; `End_Tasks` shuts them down and is called once from
+  `Mandelbrot_GUI.Run` after `Gtk.Main.Main` returns. `Display_Buffer`
+  (colour indices) must not be accessed while `Generate_Set` is running.
+- `src/mandelbrot_gui.ads`/`.adb` hold the GUI: the colour palette, Cairo
+  rendering, mouse-driven selection and its confirmation buttons, the
+  Help dialog, and PNG export. All GUI state (`Bottom_Left`, `Top_Right`,
+  `Previous_Bottom_Left`/`Previous_Top_Right`, `Selection_State`,
+  `Surface`, the widgets) is declared at package-body level, not inside
+  `Run`.
   - This is required, not stylistic: GtkAda signal callbacks (`On_Draw`,
     `On_Destroy`, `On_Button_Press`, etc.) are connected via `'Access`,
     and Ada's accessibility rules forbid taking `'Access` of a subprogram
     nested inside another subprogram for a library-level access-to-subprogram
     type. Declaring callbacks and the state they touch at package-body level
     (rather than nested inside `Run`) is what makes this legal.
-- Rendering pipeline: `Generate_Set` fills `Display_Buffer` (colour indices)
-  for the current corners; `Render_Buffer` maps those indices through
-  `Palette` into a `RGB24_Array_Access` pixel buffer backing a Cairo
-  `Image_Surface` (created once via `Create_For_Data_RGB24`). Subsequent
-  updates mutate that same buffer in place and call
-  `Cairo.Surface.Flush`/`Mark_Dirty` rather than recreating the surface.
-  `On_Draw` just blits the cached surface (plus a rubber-band rectangle
-  while dragging) — it never recomputes anything.
-- Mouse-driven zoom (`On_Button_Press`/`On_Motion`/`On_Button_Release` on the
-  `Gtk_Drawing_Area`) tracks a drag in pixel space via `Compute_Selection`,
-  which forces the selection square and clamps it to the canvas. On release,
-  the pixel rectangle is mapped back into the complex plane using the
-  current scale factor and `Recalculate` reruns `Generate_Set` for the new
-  corners.
-- `Colour_Insdices` (note: misspelled in the original code, kept for
-  consistency) is a small `Unsigned_8` subrange, not the full 0-255 range.
-  `Hue_To_RGB` divides by `Colour_Insdices'Last` (not a hardcoded 255) so
-  the full hue wheel always spans whatever that range currently is — if
-  the range changes again, no other code needs to change.
+- Rendering pipeline: `Generate_Set` (in `Calculation_Engine`) fills
+  `Display_Buffer` for the current corners; `Render_Buffer` maps those
+  indices through `Palette` into a `RGB24_Array_Access` pixel buffer
+  backing a Cairo `Image_Surface` (created once via
+  `Create_For_Data_RGB24`). Subsequent updates mutate that same buffer in
+  place and call `Cairo.Surface.Flush`/`Mark_Dirty` rather than recreating
+  the surface. `On_Draw` just blits the cached surface (plus a rubber-band
+  rectangle while a selection is being dragged or is pending) — it never
+  recomputes anything.
+- Mouse-driven zoom (`On_Button_Press`/`On_Motion`/`On_Button_Release` on
+  the `Gtk_Drawing_Area`) tracks a drag in pixel space via
+  `Compute_Selection`, which forces the selection square and clamps it to
+  the canvas. A completed drag no longer recalculates immediately: it
+  sets `Selection_State := Pending` and the square stays drawn (because
+  `Start_X/Y`/`Cur_X/Y` don't change until the next drag, `On_Draw` and
+  the button handlers can keep calling `Compute_Selection` to get the
+  same fixed rectangle) until one of the selection buttons is clicked:
+  - **Selection OK** maps the pixel rectangle into the complex plane via
+    `Corners_From_Selection` and calls `Recalculate`.
+  - **Cancel Selection** discards it without recalculating.
+  - **Reset Selection** calls `Recalculate` with the initial `(-2,-2)` to
+    `(2,2)` corners.
+  - **Previous Selection** is a single-level toggle: `Recalculate` always
+    saves the outgoing view into `Previous_Bottom_Left`/
+    `Previous_Top_Right` before overwriting `Bottom_Left`/`Top_Right`, so
+    clicking it swaps back to what was just displayed.
+  - **Help** opens a `Gtk_Message_Dialog` describing all of the above,
+    plus a build date from `GNAT.Source_Info.Compilation_ISO_Date`.
+- `Colour_Indices` (declared in `calculation_engine.ads`) is a small
+  `Unsigned_8` subrange, not the full 0-255 range. `Hue_To_RGB` divides by
+  `Colour_Indices'Last` (not a hardcoded 255) so the full hue wheel always
+  spans whatever that range currently is — if the range changes again, no
+  other code needs to change.
 - PNG export (`On_Save_Clicked`) converts the live Cairo surface to a
   `Gdk_Pixbuf` and saves it via `gdk_pixbuf_savev`, which is hand-imported
   with `pragma Import (C, ...)` because GtkAda's own `Gdk.Pixbuf.Save`
