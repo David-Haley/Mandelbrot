@@ -13,7 +13,11 @@
 --  20260907 : Replaced Previous Selection with Undo/Redo buttons backed by
 --  a full view history.
 
+--  20260907 : Replaced Save as PNG button with a File menu (Save as PNG,
+--  Save History, Load History, Replay).
+
 with Ada.Containers.Doubly_Linked_Lists;
+with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Ada.Strings; use Ada.Strings;
 with Ada.Strings.Fixed;
@@ -40,11 +44,16 @@ with Gtk.Message_Dialog; use Gtk.Message_Dialog;
 with Gtk.Drawing_Area; use Gtk.Drawing_Area;
 with Gtk.Enums; use Gtk.Enums;
 with Gtk.Main;
+with Gtk.Menu; use Gtk.Menu;
+with Gtk.Menu_Item; use Gtk.Menu_Item;
+with Gtk.Menu_Button; use Gtk.Menu_Button;
+with Gtk.Spin_Button; use Gtk.Spin_Button;
 with Gdk.Event; use Gdk.Event;
 with Gdk.Pixbuf; use Gdk.Pixbuf;
 with Cairo; use Cairo;
 with Cairo.Image_Surface; use Cairo.Image_Surface;
 with Cairo.Surface;
+with Glib.Main; use Glib.Main;
 
 package body Mandelbrot_GUI is
 
@@ -128,12 +137,14 @@ package body Mandelbrot_GUI is
    Top_Right : Complex;
    History : Corner_Lists.List;
    Current : Corner_Lists.Cursor;
+   Replay_Cursor : Corner_Lists.Cursor;
+   Replay_Interval_Ms : Guint := 500;
    Surface : Cairo_Surface;
 
    Window : Gtk_Window;
    Drawing_Area : Gtk_Drawing_Area;
    Corner_Label : Gtk_Label;
-   Save_Button : Gtk_Button;
+   File_Button : Gtk_Menu_Button;
    Help_Button : Gtk_Button;
    Reset_Button : Gtk_Button;
    Undo_Button : Gtk_Button;
@@ -211,6 +222,17 @@ package body Mandelbrot_GUI is
       return Ada.Strings.Fixed.Trim (Buffer, Left);
    end Format;
 
+   function Full_Precision (Value : Real) return String is
+
+      -- Unlike Format (fixed 6 decimals, for on-screen display), this
+      -- gives Real'Image's full Digits-precision decimal-with-exponent
+      -- form, e.g. "-2.00000000000000E+00", so History saved to and
+      -- loaded from JSON round-trips exactly.
+
+   begin -- Full_Precision
+      return Ada.Strings.Fixed.Trim (Real'Image (Value), Left);
+   end Full_Precision;
+
    procedure Update_Label is
 
    begin -- Update_Label
@@ -259,7 +281,7 @@ package body Mandelbrot_GUI is
       return Result /= 0;
    end Save_Pixbuf_With_Metadata;
 
-   procedure On_Save_Clicked (Self : access Gtk_Button_Record'Class) is
+   procedure On_Save_Clicked (Self : access Gtk_Menu_Item_Record'Class) is
 
       pragma Unreferenced (Self);
 
@@ -365,6 +387,272 @@ package body Mandelbrot_GUI is
               Top_Right => (New_Bottom_Left.Re + Width,
                              New_Bottom_Left.Im + Width));
    end Corners_From_Selection;
+
+   procedure Write_History (Filename : in String) is
+
+      File : Ada.Text_IO.File_Type;
+      C : Corner_Lists.Cursor := History.First;
+      First : Boolean := True;
+
+   begin -- Write_History
+      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Filename);
+      Ada.Text_IO.Put_Line (File, "[");
+      while Corner_Lists.Has_Element (C) loop
+         declare
+            V : constant Corner_Pair := Corner_Lists.Element (C);
+         begin
+            if not First then
+               Ada.Text_IO.Put_Line (File, ",");
+            end if;
+            First := False;
+            Ada.Text_IO.Put
+              (File,
+               "  {""bottom_left"": {""re"": " &
+               Full_Precision (V.Bottom_Left.Re) &
+               ", ""im"": " & Full_Precision (V.Bottom_Left.Im) &
+               "}, ""top_right"": {""re"": " &
+               Full_Precision (V.Top_Right.Re) &
+               ", ""im"": " & Full_Precision (V.Top_Right.Im) & "}}");
+         end;
+         C := Corner_Lists.Next (C);
+      end loop;
+      Ada.Text_IO.New_Line (File);
+      Ada.Text_IO.Put_Line (File, "]");
+      Ada.Text_IO.Close (File);
+   end Write_History;
+
+   procedure Read_Real_After
+     (Text : in String; Key : in String; Position : in out Positive;
+      Value : out Real) is
+
+      Key_Pos : constant Natural :=
+        Ada.Strings.Fixed.Index (Text, Key, Position);
+      Colon_Pos : constant Natural :=
+        Ada.Strings.Fixed.Index (Text, ":", Key_Pos);
+      Last : Positive;
+
+   begin -- Read_Real_After
+      Real_IO.Get (Text (Colon_Pos + 1 .. Text'Last), Value, Last);
+      Position := Last + 1;
+   end Read_Real_After;
+
+   procedure Load_History (Filename : in String) is
+
+      New_History : Corner_Lists.List;
+      Text : Ada.Strings.Unbounded.Unbounded_String;
+      File : Ada.Text_IO.File_Type;
+      Position : Positive := 1;
+
+   begin -- Load_History
+      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Filename);
+      while not Ada.Text_IO.End_Of_File (File) loop
+         Ada.Strings.Unbounded.Append
+           (Text, Ada.Text_IO.Get_Line (File) & ASCII.LF);
+      end loop;
+      Ada.Text_IO.Close (File);
+      declare
+         Plain : constant String := Ada.Strings.Unbounded.To_String (Text);
+         BL_Re, BL_Im, TR_Re, TR_Im : Real;
+      begin
+         loop
+            exit when Ada.Strings.Fixed.Index
+              (Plain, """bottom_left""", Position) = 0;
+            Read_Real_After (Plain, """re""", Position, BL_Re);
+            Read_Real_After (Plain, """im""", Position, BL_Im);
+            Read_Real_After (Plain, """re""", Position, TR_Re);
+            Read_Real_After (Plain, """im""", Position, TR_Im);
+            if TR_Re <= BL_Re or else TR_Im <= BL_Im then
+               raise Ada.Text_IO.Data_Error;
+            end if;
+            New_History.Append
+              ((Bottom_Left => (BL_Re, BL_Im), Top_Right => (TR_Re, TR_Im)));
+         end loop;
+      end;
+      if New_History.Is_Empty then
+         raise Ada.Text_IO.Data_Error;
+      end if;
+      History := New_History;
+      Current := History.Last;
+      Undo_Button.Set_Sensitive
+        (Corner_Lists.Has_Element (Corner_Lists.Previous (Current)));
+      Redo_Button.Set_Sensitive (False);
+      declare
+         View : constant Corner_Pair := Corner_Lists.Element (Current);
+      begin
+         Set_View (View.Bottom_Left, View.Top_Right);
+      end;
+   end Load_History;
+
+   procedure On_Save_History_Clicked
+     (Self : access Gtk_Menu_Item_Record'Class) is
+
+      pragma Unreferenced (Self);
+
+      Dialog : Gtk_File_Chooser_Dialog;
+      Filter : Gtk_File_Filter;
+      Response : Gtk_Response_Type;
+      Discard_Widget : Gtk.Widget.Gtk_Widget;
+      pragma Unreferenced (Discard_Widget);
+
+   begin -- On_Save_History_Clicked
+      Gtk_New (Dialog, "Save History", Window, Action_Save);
+      Discard_Widget := Dialog.Add_Button ("Cancel", Gtk_Response_Cancel);
+      Discard_Widget := Dialog.Add_Button ("Save", Gtk_Response_Accept);
+      Dialog.Set_Current_Name ("mandelbrot_history.json");
+
+      Gtk_New (Filter);
+      Filter.Set_Name ("JSON files");
+      Filter.Add_Pattern ("*.json");
+      Dialog.Add_Filter (Filter);
+
+      Response := Dialog.Run;
+      if Response = Gtk_Response_Accept then
+         declare
+            Chosen_Name : constant String := Dialog.Get_Filename;
+            Filename : constant String :=
+              (if Chosen_Name'Length >= 5 and then
+                  Chosen_Name (Chosen_Name'Last - 4 .. Chosen_Name'Last) =
+                  ".json"
+               then Chosen_Name else Chosen_Name & ".json");
+         begin
+            Write_History (Filename);
+         exception
+            when others =>
+               declare
+                  Error_Dialog : Gtk_Message_Dialog;
+                  Error_Response : Gtk_Response_Type;
+                  pragma Unreferenced (Error_Response);
+               begin
+                  Gtk_New (Error_Dialog, Window, Modal, Message_Error,
+                           Buttons_Close, "Failed to save " & Filename);
+                  Error_Response := Error_Dialog.Run;
+                  Error_Dialog.Destroy;
+               end;
+         end;
+      end if;
+      Dialog.Destroy;
+   end On_Save_History_Clicked;
+
+   procedure On_Load_History_Clicked
+     (Self : access Gtk_Menu_Item_Record'Class) is
+
+      pragma Unreferenced (Self);
+
+      Dialog : Gtk_File_Chooser_Dialog;
+      Filter : Gtk_File_Filter;
+      Response : Gtk_Response_Type;
+      Discard_Widget : Gtk.Widget.Gtk_Widget;
+      pragma Unreferenced (Discard_Widget);
+
+   begin -- On_Load_History_Clicked
+      Gtk_New (Dialog, "Load History", Window, Action_Open);
+      Discard_Widget := Dialog.Add_Button ("Cancel", Gtk_Response_Cancel);
+      Discard_Widget := Dialog.Add_Button ("Open", Gtk_Response_Accept);
+
+      Gtk_New (Filter);
+      Filter.Set_Name ("JSON files");
+      Filter.Add_Pattern ("*.json");
+      Dialog.Add_Filter (Filter);
+
+      Response := Dialog.Run;
+      if Response = Gtk_Response_Accept then
+         declare
+            Filename : constant String := Dialog.Get_Filename;
+         begin
+            Load_History (Filename);
+         exception
+            when others =>
+               declare
+                  Error_Dialog : Gtk_Message_Dialog;
+                  Error_Response : Gtk_Response_Type;
+                  pragma Unreferenced (Error_Response);
+               begin
+                  Gtk_New (Error_Dialog, Window, Modal, Message_Error,
+                           Buttons_Close, "Failed to load " & Filename);
+                  Error_Response := Error_Dialog.Run;
+                  Error_Dialog.Destroy;
+               end;
+         end;
+      end if;
+      Dialog.Destroy;
+   end On_Load_History_Clicked;
+
+   function Replay_Step return Boolean is
+
+      View : constant Corner_Pair := Corner_Lists.Element (Replay_Cursor);
+
+   begin -- Replay_Step
+      Set_View (View.Bottom_Left, View.Top_Right);
+      if Corner_Lists.Has_Element (Corner_Lists.Next (Replay_Cursor)) then
+         Replay_Cursor := Corner_Lists.Next (Replay_Cursor);
+         return True;
+      else
+         Current := History.Last;
+         Reset_Button.Set_Sensitive (True);
+         Undo_Button.Set_Sensitive
+           (Corner_Lists.Has_Element (Corner_Lists.Previous (Current)));
+         Redo_Button.Set_Sensitive (False);
+         File_Button.Set_Sensitive (True);
+         Drawing_Area.Set_Sensitive (True);
+         return False;
+      end if;
+   end Replay_Step;
+
+   procedure On_Replay_Clicked (Self : access Gtk_Menu_Item_Record'Class) is
+
+      pragma Unreferenced (Self);
+
+      Dialog : Gtk_Dialog;
+      Spin : Gtk_Spin_Button;
+      Interval_Label : Gtk_Label;
+      Box : Gtk_Box;
+      Response : Gtk_Response_Type;
+      Discard_Widget : Gtk.Widget.Gtk_Widget;
+      pragma Unreferenced (Discard_Widget);
+      Timer_Id : G_Source_Id;
+      pragma Unreferenced (Timer_Id);
+
+   begin -- On_Replay_Clicked
+      Gtk_New (Dialog, "Replay Interval", Window, Modal);
+      Discard_Widget := Dialog.Add_Button ("Cancel", Gtk_Response_Cancel);
+      Discard_Widget := Dialog.Add_Button ("Start", Gtk_Response_Accept);
+
+      Gtk_New (Interval_Label,
+               "Milliseconds between steps (0 = as fast as the display" &
+               " can recalculate):");
+      Gtk_New (Spin, 0.0, 30_000.0, 100.0);
+      Spin.Set_Value (Gdouble (Replay_Interval_Ms));
+      Gtk_New (Box, Orientation_Horizontal, 6);
+      Box.Pack_Start (Interval_Label, Expand => False, Fill => False);
+      Box.Pack_Start (Spin, Expand => True, Fill => True);
+      Dialog.Get_Content_Area.Pack_Start
+        (Box, Expand => False, Fill => False);
+      Box.Show_All;
+
+      Response := Dialog.Run;
+      if Response = Gtk_Response_Accept then
+         Replay_Interval_Ms := Guint (Spin.Get_Value_As_Int);
+         Selection_State := No_Selection;
+         Reset_Button.Set_Sensitive (False);
+         Undo_Button.Set_Sensitive (False);
+         Redo_Button.Set_Sensitive (False);
+         Cancel_Button.Set_Sensitive (False);
+         Selection_OK_Button.Set_Sensitive (False);
+         File_Button.Set_Sensitive (False);
+         Drawing_Area.Set_Sensitive (False);
+         Replay_Cursor := History.First;
+         if Replay_Interval_Ms = 0 then
+            --  Steps back-to-back, paced only by how long each
+            --  Set_View/Generate_Set recalculation takes, rather than
+            --  by a fixed timer interval.
+            Timer_Id := Glib.Main.Idle_Add (Replay_Step'Access);
+         else
+            Timer_Id :=
+              Glib.Main.Timeout_Add (Replay_Interval_Ms, Replay_Step'Access);
+         end if;
+      end if;
+      Dialog.Destroy;
+   end On_Replay_Clicked;
 
    function On_Draw (Self : access Gtk_Widget_Record'Class;
                       Cr   : Cairo.Cairo_Context) return Boolean is
@@ -547,9 +835,16 @@ package body Mandelbrot_GUI is
          "Cancel Selection: discard the current selection." & ASCII.LF &
          "Reset Selection: return to the full initial view." & ASCII.LF &
          "Undo: step back to the previous view." & ASCII.LF &
-         "Redo: step forward again after an Undo." & ASCII.LF &
-         "Save as PNG...: save the current image, with the corner" &
-         " coordinates embedded as metadata." & ASCII.LF & ASCII.LF &
+         "Redo: step forward again after an Undo." & ASCII.LF & ASCII.LF &
+         "File menu:" & ASCII.LF &
+         "  Save as PNG...: save the current image, with the corner" &
+         " coordinates embedded as metadata." & ASCII.LF &
+         "  Save History...: write the view history to a JSON file." &
+         ASCII.LF &
+         "  Load History...: replace the view history from a JSON file." &
+         ASCII.LF &
+         "  Replay...: step through the loaded history automatically at" &
+         " a chosen interval." & ASCII.LF & ASCII.LF &
          "Build date: " & GNAT.Source_Info.Compilation_ISO_Date &
          ASCII.LF & ASCII.LF &
          "Credits: David Haley and Claude (Anthropic).");
@@ -601,8 +896,37 @@ package body Mandelbrot_GUI is
       Selection_OK_Button.On_Clicked (On_Selection_OK_Clicked'Access);
       Selection_OK_Button.Set_Sensitive (False);
 
-      Gtk_New (Save_Button, "Save as PNG...");
-      Save_Button.On_Clicked (On_Save_Clicked'Access);
+      declare
+         File_Menu : Gtk_Menu;
+         Save_Png_Item : Gtk_Menu_Item;
+         Save_History_Item : Gtk_Menu_Item;
+         Load_History_Item : Gtk_Menu_Item;
+         Replay_Item : Gtk_Menu_Item;
+      begin
+         Gtk_New (File_Menu);
+
+         Gtk_New_With_Label (Save_Png_Item, "Save as PNG...");
+         Save_Png_Item.On_Activate (On_Save_Clicked'Access);
+         File_Menu.Append (Save_Png_Item);
+
+         Gtk_New_With_Label (Save_History_Item, "Save History...");
+         Save_History_Item.On_Activate (On_Save_History_Clicked'Access);
+         File_Menu.Append (Save_History_Item);
+
+         Gtk_New_With_Label (Load_History_Item, "Load History...");
+         Load_History_Item.On_Activate (On_Load_History_Clicked'Access);
+         File_Menu.Append (Load_History_Item);
+
+         Gtk_New_With_Label (Replay_Item, "Replay...");
+         Replay_Item.On_Activate (On_Replay_Clicked'Access);
+         File_Menu.Append (Replay_Item);
+
+         File_Menu.Show_All;
+
+         Gtk_New (File_Button);
+         File_Button.Set_Label ("File");
+         File_Button.Set_Popup (File_Menu);
+      end;
 
       Gtk_New (Help_Button, "Help");
       Help_Button.On_Clicked (On_Help_Clicked'Access);
@@ -620,9 +944,9 @@ package body Mandelbrot_GUI is
         (Selection_OK_Button, Expand => False, Fill => False);
       --  Pack_End places each new child further from the box's end than
       --  the previous one, so Help_Button (packed first) ends up at the
-      --  far right with Save_Button to its left.
+      --  far right with File_Button to its left.
       Selection_Box.Pack_End (Help_Button, Expand => False, Fill => False);
-      Selection_Box.Pack_End (Save_Button, Expand => False, Fill => False);
+      Selection_Box.Pack_End (File_Button, Expand => False, Fill => False);
 
       Gtk_New (Drawing_Area);
       Drawing_Area.Set_Size_Request (Gint (Image_Size), Gint (Image_Size));

@@ -27,7 +27,8 @@ regenerated content.
   (colour indices) must not be accessed while `Generate_Set` is running.
 - `src/mandelbrot_gui.ads`/`.adb` hold the GUI: the colour palette, Cairo
   rendering, mouse-driven selection and its confirmation buttons, the
-  Help dialog, and PNG export. All GUI state (`Bottom_Left`, `Top_Right`,
+  Help dialog, and the File menu (PNG export, JSON history save/load,
+  replay). All GUI state (`Bottom_Left`, `Top_Right`,
   `History`/`Current`, `Selection_State`, `Surface`, the widgets) is
   declared at package-body level, not inside `Run`.
   - This is required, not stylistic: GtkAda signal callbacks (`On_Draw`,
@@ -80,6 +81,54 @@ regenerated content.
   with `pragma Import (C, ...)` because GtkAda's own `Gdk.Pixbuf.Save`
   binding only supports a single option key/value pair — not enough to
   attach both `tEXt::Bottom_Left` and `tEXt::Top_Right` metadata chunks.
+- The former "Save as PNG..." button is now a `Gtk_Menu_Button`
+  (`File_Button`) popping up a `Gtk_Menu` of four `Gtk_Menu_Item`s (Save
+  as PNG, Save History, Load History, Replay), built as locals inside
+  `Run` — only the click *callbacks* need to live at package-body level
+  for the `'Access` accessibility rule above; plain widget handles that
+  are just constructed and packed/popped-up don't. `Gtk_Menu_Item`'s
+  `On_Activate` callback type takes `access Gtk_Menu_Item_Record'Class`,
+  not `Gtk_Button_Record'Class`, so `On_Save_Clicked` changed signature
+  accordingly when it moved from a button into the menu. The popup menu
+  must get its own explicit `Show_All` — `Window.Show_All` never reaches
+  it, since it's attached only via `Set_Popup`, not packed into the
+  window's widget tree.
+- **Save History**/**Load History** (`Write_History`/`Load_History`)
+  serialise `History` to/from a hand-rolled JSON array of
+  `{bottom_left, top_right}` corner objects — there is no JSON dependency
+  in `alire.toml`, and the shape is simple enough (four `Real`s per
+  entry) that adding one wasn't worth it. Writing uses `Full_Precision`
+  (a sibling of the on-screen `Format` helper, both near `Real_IO`) which
+  returns `Real'Image` trimmed of its leading space — the full
+  `Digits => 15` decimal-with-exponent form (e.g.
+  `"-2.00000000000000E+00"`), not `Format`'s fixed 6-decimal display
+  rounding, so History round-trips through JSON exactly; reading scans
+  for the literal `"re"`/`"im"` keys via `Ada.Strings.Fixed.Index` and
+  parses the number after each with `Real_IO.Get` (which accepts
+  `Real'Image`'s exponent notation directly), which is not a general
+  JSON parser but is sufficient for this app's own fixed schema, wrapped
+  in a `when others` handler (in the calling `On_Load_History_Clicked`)
+  so a malformed file produces an error dialog instead of a crash.
+  `Load_History` checks `Top_Right.Re > Bottom_Left.Re`/`.Im` per entry
+  (loose ordering only, not exact-square equality, since a non-square
+  pair can't crash anything downstream — see `Generate_Set` above).
+- **Replay** (`On_Replay_Clicked`/`Replay_Step`) asks for a step interval
+  (0-30000 ms) via a small `Gtk_Dialog` with a `Gtk_Spin_Button`, then
+  drives `Replay_Cursor` from `History.First` to `History.Last` one step
+  per firing, calling `Set_View` at each step (never touching
+  `History`/`Current` until it finishes, at which point `Current` moves
+  to `History.Last`, matching how repeated Redo would land you there). A
+  nonzero interval uses `Glib.Main.Timeout_Add`; an interval of `0` uses
+  `Glib.Main.Idle_Add` instead, so steps fire back-to-back paced only by
+  how long each `Set_View`/`Generate_Set` recalculation actually takes,
+  rather than by a fixed timer. It disables `Reset_Button`/`Undo_Button`/
+  `Redo_Button`/`File_Button` *and* `Cancel_Button`/`Selection_OK_Button`/
+  `Drawing_Area` for its duration: `Recalculate` (reachable only via
+  Selection OK) trims and appends to `History`, which would invalidate
+  `Replay_Cursor` if a drag-zoom completed mid-replay, raising
+  `Program_Error` from inside GTK's own main-loop callback —
+  `Drawing_Area.Set_Sensitive (False)` blocks the drag itself, closing
+  off that path entirely.
 
 ## Working in this repo
 
