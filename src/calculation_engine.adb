@@ -105,11 +105,11 @@ package body Calculation_Engine is
                                                              X,
                                                              Y));
                end loop; -- X in Display_Indices
-               if Y + Cores < Display_Indices'Last then
+               if Y + Cores <= Display_Indices'Last then
                   Y := @ + Cores;
                else
                   Finished := True;
-               end if; -- Y + Cores < Display_Indices'Last
+               end if; -- Y + Cores <= Display_Indices'Last
             end loop; -- not Finished
             delay 0.01;
             --  Compromise between making start of calculations responsive
