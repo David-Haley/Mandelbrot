@@ -6,6 +6,10 @@
 --  20260907 : Set calculation moved to Calculation_Engine, now uses multiple
 --  cores.
 
+--  20260907 : Added Reset Selection, Previous Selection, Cancel Selection
+--  and Selection OK buttons; a dragged selection square now requires
+--  Selection OK before it is recalculated and displayed.
+
 with Ada.Text_IO;
 with Ada.Strings; use Ada.Strings;
 with Ada.Strings.Fixed;
@@ -104,20 +108,32 @@ package body Mandelbrot_GUI is
    Pixel_Data : constant RGB24_Array_Access :=
      new RGB24_Array (0 .. Image_Size * Image_Size - 1);
 
+   Initial_Bottom_Left : constant Complex := (-2.0, -2.0);
+   Initial_Top_Right : constant Complex := (2.0, 2.0);
+
    Bottom_Left : Complex;
    Top_Right : Complex;
+   Previous_Bottom_Left : Complex := Initial_Bottom_Left;
+   Previous_Top_Right : Complex := Initial_Top_Right;
    Surface : Cairo_Surface;
 
    Window : Gtk_Window;
    Drawing_Area : Gtk_Drawing_Area;
    Corner_Label : Gtk_Label;
    Save_Button : Gtk_Button;
+   Reset_Button : Gtk_Button;
+   Previous_Button : Gtk_Button;
+   Cancel_Button : Gtk_Button;
+   Selection_OK_Button : Gtk_Button;
 
    --  Mouse-driven area selection. A left-button drag defines the diagonal
-   --  of a square (the drag is forced square, and clamped to the display),
-   --  which is used to recompute Display_Buffer for the selected area.
+   --  of a square (the drag is forced square, and clamped to the display).
+   --  On release, a valid square is held Pending until Selection OK is
+   --  clicked (which recomputes Display_Buffer for the selected area) or
+   --  Cancel Selection is clicked (which discards it).
 
-   Dragging : Boolean := False;
+   type Selection_States is (No_Selection, Dragging, Pending);
+   Selection_State : Selection_States := No_Selection;
    Start_X, Start_Y, Cur_X, Cur_Y : Gdouble := 0.0;
 
    type Selections (Valid : Boolean := False) is record
@@ -188,8 +204,9 @@ package body Mandelbrot_GUI is
          Format (Bottom_Left.Im) & ")   Top Right: (" &
          Format (Top_Right.Re) & ", " & Format (Top_Right.Im) & ")" &
          ASCII.LF &
-         "Drag the left mouse button over the image to zoom into a" &
-         " selected area.");
+         "Drag the left mouse button over the image to select an area," &
+         " then click Selection OK to zoom in, or Cancel Selection to" &
+         " discard it.");
    end Update_Label;
 
    function Save_Pixbuf_With_Metadata
@@ -301,6 +318,9 @@ package body Mandelbrot_GUI is
    procedure Recalculate (New_Bottom_Left, New_Top_Right : in Complex) is
 
    begin -- Recalculate
+      Previous_Bottom_Left := Bottom_Left;
+      Previous_Top_Right := Top_Right;
+      Previous_Button.Set_Sensitive (True);
       Bottom_Left := New_Bottom_Left;
       Top_Right := New_Top_Right;
       Generate_Set (Bottom_Left, Top_Right);
@@ -308,6 +328,26 @@ package body Mandelbrot_GUI is
       Update_Label;
       Drawing_Area.Queue_Draw;
    end Recalculate;
+
+   type Corner_Pair is record
+      Bottom_Left, Top_Right : Complex;
+   end record;
+
+   function Corners_From_Selection (S : in Selections) return Corner_Pair
+     with Pre => S.Valid is
+
+      M : constant Real :=
+        (Top_Right.Re - Bottom_Left.Re) / Real (Display_Indices'Last);
+      New_Bottom_Left : constant Complex :=
+        (Bottom_Left.Re + M * Real (S.Min_X),
+         Bottom_Left.Im + M * Real (S.Min_Y));
+      Width : constant Real := M * Real (S.Side);
+
+   begin -- Corners_From_Selection
+      return (Bottom_Left => New_Bottom_Left,
+              Top_Right => (New_Bottom_Left.Re + Width,
+                             New_Bottom_Left.Im + Width));
+   end Corners_From_Selection;
 
    function On_Draw (Self : access Gtk_Widget_Record'Class;
                       Cr   : Cairo.Cairo_Context) return Boolean is
@@ -319,7 +359,7 @@ package body Mandelbrot_GUI is
    begin -- On_Draw
       Set_Source_Surface (Cr, Surface, 0.0, 0.0);
       Paint (Cr);
-      if Dragging then
+      if Selection_State /= No_Selection then
          Selection := Compute_Selection;
          if Selection.Valid then
             Cairo.Set_Source_Rgb (Cr, 1.0, 1.0, 1.0);
@@ -347,7 +387,9 @@ package body Mandelbrot_GUI is
 
    begin -- On_Button_Press
       if Event.Button = 1 then
-         Dragging := True;
+         Selection_State := Dragging;
+         Cancel_Button.Set_Sensitive (False);
+         Selection_OK_Button.Set_Sensitive (False);
          Start_X := Event.X;
          Start_Y := Event.Y;
          Cur_X := Event.X;
@@ -363,7 +405,7 @@ package body Mandelbrot_GUI is
       pragma Unreferenced (Self);
 
    begin -- On_Motion
-      if Dragging then
+      if Selection_State = Dragging then
          Cur_X := Event.X;
          Cur_Y := Event.Y;
          Drawing_Area.Queue_Draw;
@@ -377,38 +419,83 @@ package body Mandelbrot_GUI is
       pragma Unreferenced (Self);
 
       Selection : Selections;
-      M, Width : Real;
-      New_Bottom_Left, New_Top_Right : Complex;
 
    begin -- On_Button_Release
-      if Dragging and then Event.Button = 1 then
-         Dragging := False;
+      if Selection_State = Dragging and then Event.Button = 1 then
          Cur_X := Event.X;
          Cur_Y := Event.Y;
          Selection := Compute_Selection;
          if Selection.Valid then
-            M := (Top_Right.Re - Bottom_Left.Re) / Real (Display_Indices'Last);
-            New_Bottom_Left :=
-              (Bottom_Left.Re + M * Real (Selection.Min_X),
-               Bottom_Left.Im + M * Real (Selection.Min_Y));
-            Width := M * Real (Selection.Side);
-            New_Top_Right :=
-              (New_Bottom_Left.Re + Width, New_Bottom_Left.Im + Width);
-            Recalculate (New_Bottom_Left, New_Top_Right);
+            Selection_State := Pending;
+            Cancel_Button.Set_Sensitive (True);
+            Selection_OK_Button.Set_Sensitive (True);
          else
-            Drawing_Area.Queue_Draw;
+            Selection_State := No_Selection;
          end if;
+         Drawing_Area.Queue_Draw;
       end if;
       return False;
    end On_Button_Release;
 
+   procedure On_Reset_Clicked (Self : access Gtk_Button_Record'Class) is
+
+      pragma Unreferenced (Self);
+
+   begin -- On_Reset_Clicked
+      Selection_State := No_Selection;
+      Cancel_Button.Set_Sensitive (False);
+      Selection_OK_Button.Set_Sensitive (False);
+      Recalculate (Initial_Bottom_Left, Initial_Top_Right);
+   end On_Reset_Clicked;
+
+   procedure On_Previous_Clicked (Self : access Gtk_Button_Record'Class) is
+
+      pragma Unreferenced (Self);
+
+   begin -- On_Previous_Clicked
+      Selection_State := No_Selection;
+      Cancel_Button.Set_Sensitive (False);
+      Selection_OK_Button.Set_Sensitive (False);
+      Recalculate (Previous_Bottom_Left, Previous_Top_Right);
+   end On_Previous_Clicked;
+
+   procedure On_Cancel_Clicked (Self : access Gtk_Button_Record'Class) is
+
+      pragma Unreferenced (Self);
+
+   begin -- On_Cancel_Clicked
+      Selection_State := No_Selection;
+      Cancel_Button.Set_Sensitive (False);
+      Selection_OK_Button.Set_Sensitive (False);
+      Drawing_Area.Queue_Draw;
+   end On_Cancel_Clicked;
+
+   procedure On_Selection_OK_Clicked
+     (Self : access Gtk_Button_Record'Class) is
+
+      pragma Unreferenced (Self);
+
+      Selection : constant Selections := Compute_Selection;
+      Corners : Corner_Pair;
+
+   begin -- On_Selection_OK_Clicked
+      if Selection_State = Pending and then Selection.Valid then
+         Corners := Corners_From_Selection (Selection);
+         Selection_State := No_Selection;
+         Cancel_Button.Set_Sensitive (False);
+         Selection_OK_Button.Set_Sensitive (False);
+         Recalculate (Corners.Bottom_Left, Corners.Top_Right);
+      end if;
+   end On_Selection_OK_Clicked;
+
    procedure Run is
 
       Vbox : Gtk_Box;
+      Selection_Box : Gtk_Box;
 
    begin -- Run
-      Bottom_Left := (-2.0, -2.0);
-      Top_Right := (2.0, 2.0);
+      Bottom_Left := Initial_Bottom_Left;
+      Top_Right := Initial_Top_Right;
 
       Surface := Create_For_Data_RGB24 (Pixel_Data, Gint (Image_Size),
                                          Gint (Image_Size));
@@ -424,6 +511,31 @@ package body Mandelbrot_GUI is
       Gtk_New (Corner_Label);
       Update_Label;
 
+      Gtk_New (Reset_Button, "Reset Selection");
+      Reset_Button.On_Clicked (On_Reset_Clicked'Access);
+
+      Gtk_New (Previous_Button, "Previous Selection");
+      Previous_Button.On_Clicked (On_Previous_Clicked'Access);
+      Previous_Button.Set_Sensitive (False);
+
+      Gtk_New (Cancel_Button, "Cancel Selection");
+      Cancel_Button.On_Clicked (On_Cancel_Clicked'Access);
+      Cancel_Button.Set_Sensitive (False);
+
+      Gtk_New (Selection_OK_Button, "Selection OK");
+      Selection_OK_Button.On_Clicked (On_Selection_OK_Clicked'Access);
+      Selection_OK_Button.Set_Sensitive (False);
+
+      Gtk_New (Selection_Box, Orientation_Horizontal, 0);
+      Selection_Box.Pack_Start
+        (Reset_Button, Expand => False, Fill => False);
+      Selection_Box.Pack_Start
+        (Previous_Button, Expand => False, Fill => False);
+      Selection_Box.Pack_Start
+        (Cancel_Button, Expand => False, Fill => False);
+      Selection_Box.Pack_Start
+        (Selection_OK_Button, Expand => False, Fill => False);
+
       Gtk_New (Save_Button, "Save as PNG...");
       Save_Button.On_Clicked (On_Save_Clicked'Access);
 
@@ -438,6 +550,7 @@ package body Mandelbrot_GUI is
 
       Gtk_New (Vbox, Orientation_Vertical, 0);
       Vbox.Pack_Start (Corner_Label, Expand => False, Fill => False);
+      Vbox.Pack_Start (Selection_Box, Expand => False, Fill => False);
       Vbox.Pack_Start (Save_Button, Expand => False, Fill => False);
       Vbox.Pack_Start (Drawing_Area, Expand => True, Fill => True);
 
