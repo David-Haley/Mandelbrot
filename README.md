@@ -15,8 +15,8 @@ A GtkAda GUI for exploring the Mandelbrot set, written in Ada.
   - **Selection OK** — zoom into the selected area.
   - **Cancel Selection** — discard the selection.
   - **Reset Selection** — return to the full initial view.
-  - **Previous Selection** — toggle back to the corners used before the
-    last zoom.
+  - **Undo** / **Redo** — step backward/forward through the full history
+    of views (both Reset Selection and Selection OK add an entry).
 - **Help** button describing all of the above, plus the build date.
 - "Save as PNG..." writes the currently displayed image to a PNG file,
   embedding the corner coordinates as `tEXt` metadata chunks.
