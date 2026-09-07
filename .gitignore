@@ -2,10 +2,13 @@
 obj/
 bin/
 
-# Alire-managed dependencies and generated config
-/alire/cache/
-/alire/build/
+# Alire-managed dependencies, lockfile, and generated config
+# (alire.lock pins platform-specific system-package origins, e.g.
+# libgtk-3-dev on Linux vs mingw-w64-x86_64-gtk3 on Windows/MSYS2 - keeping
+# it out of git lets each OS resolve its own solution from alire.toml)
+/alire/
 /config/
+InstallationLog.txt
 
 # Compiled/binary output
 *.o
