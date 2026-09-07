@@ -28,9 +28,8 @@ regenerated content.
 - `src/mandelbrot_gui.ads`/`.adb` hold the GUI: the colour palette, Cairo
   rendering, mouse-driven selection and its confirmation buttons, the
   Help dialog, and PNG export. All GUI state (`Bottom_Left`, `Top_Right`,
-  `Previous_Bottom_Left`/`Previous_Top_Right`, `Selection_State`,
-  `Surface`, the widgets) is declared at package-body level, not inside
-  `Run`.
+  `History`/`Current`, `Selection_State`, `Surface`, the widgets) is
+  declared at package-body level, not inside `Run`.
   - This is required, not stylistic: GtkAda signal callbacks (`On_Draw`,
     `On_Destroy`, `On_Button_Press`, etc.) are connected via `'Access`,
     and Ada's accessibility rules forbid taking `'Access` of a subprogram
@@ -59,10 +58,16 @@ regenerated content.
   - **Cancel Selection** discards it without recalculating.
   - **Reset Selection** calls `Recalculate` with the initial `(-2,-2)` to
     `(2,2)` corners.
-  - **Previous Selection** is a single-level toggle: `Recalculate` always
-    saves the outgoing view into `Previous_Bottom_Left`/
-    `Previous_Top_Right` before overwriting `Bottom_Left`/`Top_Right`, so
-    clicking it swaps back to what was just displayed.
+  - **Undo**/**Redo** are backed by `History` (an
+    `Ada.Containers.Doubly_Linked_Lists.List` of `Corner_Pair`) and a
+    `Current` cursor into it. `Recalculate` (called by both Reset
+    Selection and Selection OK) truncates any redo tail past `Current`,
+    appends the new view, and moves `Current` to it.
+    `On_Undo_Clicked`/`On_Redo_Clicked` just move `Current` via
+    `Corner_Lists.Previous`/`Next` and re-render via `Set_View`, trusting
+    button sensitivity (kept in sync with `Corner_Lists.Has_Element` on
+    the adjacent cursor) the same way the rest of the file trusts
+    sensitivity elsewhere.
   - **Help** opens a `Gtk_Message_Dialog` describing all of the above,
     plus a build date from `GNAT.Source_Info.Compilation_ISO_Date`.
 - `Colour_Indices` (declared in `calculation_engine.ads`) is a small

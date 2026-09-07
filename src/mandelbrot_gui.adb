@@ -10,6 +10,10 @@
 --  and Selection OK buttons; a dragged selection square now requires
 --  Selection OK before it is recalculated and displayed.
 
+--  20260907 : Replaced Previous Selection with Undo/Redo buttons backed by
+--  a full view history.
+
+with Ada.Containers.Doubly_Linked_Lists;
 with Ada.Text_IO;
 with Ada.Strings; use Ada.Strings;
 with Ada.Strings.Fixed;
@@ -112,10 +116,18 @@ package body Mandelbrot_GUI is
    Initial_Bottom_Left : constant Complex := (-2.0, -2.0);
    Initial_Top_Right : constant Complex := (2.0, 2.0);
 
+   type Corner_Pair is record
+      Bottom_Left, Top_Right : Complex;
+   end record;
+
+   package Corner_Lists is new Ada.Containers.Doubly_Linked_Lists
+     (Corner_Pair);
+   use type Corner_Lists.Cursor;
+
    Bottom_Left : Complex;
    Top_Right : Complex;
-   Previous_Bottom_Left : Complex := Initial_Bottom_Left;
-   Previous_Top_Right : Complex := Initial_Top_Right;
+   History : Corner_Lists.List;
+   Current : Corner_Lists.Cursor;
    Surface : Cairo_Surface;
 
    Window : Gtk_Window;
@@ -124,7 +136,8 @@ package body Mandelbrot_GUI is
    Save_Button : Gtk_Button;
    Help_Button : Gtk_Button;
    Reset_Button : Gtk_Button;
-   Previous_Button : Gtk_Button;
+   Undo_Button : Gtk_Button;
+   Redo_Button : Gtk_Button;
    Cancel_Button : Gtk_Button;
    Selection_OK_Button : Gtk_Button;
 
@@ -313,26 +326,29 @@ package body Mandelbrot_GUI is
       Dialog.Destroy;
    end On_Save_Clicked;
 
-   procedure Recalculate (New_Bottom_Left, New_Top_Right : in Complex) is
+   procedure Set_View (New_Bottom_Left, New_Top_Right : in Complex) is
 
-      Old_Bottom_Left : constant Complex := Bottom_Left;
-      Old_Top_Right : constant Complex := Top_Right;
-
-   begin -- Recalculate
+   begin -- Set_View
       Bottom_Left := New_Bottom_Left;
       Top_Right := New_Top_Right;
-      Previous_Bottom_Left := Old_Bottom_Left;
-      Previous_Top_Right := Old_Top_Right;
-      Previous_Button.Set_Sensitive (True);
       Generate_Set (Bottom_Left, Top_Right);
       Render_Buffer;
       Update_Label;
       Drawing_Area.Queue_Draw;
-   end Recalculate;
+   end Set_View;
 
-   type Corner_Pair is record
-      Bottom_Left, Top_Right : Complex;
-   end record;
+   procedure Recalculate (New_Bottom_Left, New_Top_Right : in Complex) is
+
+   begin -- Recalculate
+      while Current /= History.Last loop
+         History.Delete_Last;
+      end loop;
+      History.Append ((New_Bottom_Left, New_Top_Right));
+      Current := History.Last;
+      Undo_Button.Set_Sensitive (True);
+      Redo_Button.Set_Sensitive (False);
+      Set_View (New_Bottom_Left, New_Top_Right);
+   end Recalculate;
 
    function Corners_From_Selection (S : in Selections) return Corner_Pair
      with Pre => S.Valid is
@@ -449,16 +465,41 @@ package body Mandelbrot_GUI is
       Recalculate (Initial_Bottom_Left, Initial_Top_Right);
    end On_Reset_Clicked;
 
-   procedure On_Previous_Clicked (Self : access Gtk_Button_Record'Class) is
+   procedure On_Undo_Clicked (Self : access Gtk_Button_Record'Class) is
 
       pragma Unreferenced (Self);
 
-   begin -- On_Previous_Clicked
+      View : Corner_Pair;
+
+   begin -- On_Undo_Clicked
       Selection_State := No_Selection;
       Cancel_Button.Set_Sensitive (False);
       Selection_OK_Button.Set_Sensitive (False);
-      Recalculate (Previous_Bottom_Left, Previous_Top_Right);
-   end On_Previous_Clicked;
+      Current := Corner_Lists.Previous (Current);
+      View := Corner_Lists.Element (Current);
+      Undo_Button.Set_Sensitive
+        (Corner_Lists.Has_Element (Corner_Lists.Previous (Current)));
+      Redo_Button.Set_Sensitive (True);
+      Set_View (View.Bottom_Left, View.Top_Right);
+   end On_Undo_Clicked;
+
+   procedure On_Redo_Clicked (Self : access Gtk_Button_Record'Class) is
+
+      pragma Unreferenced (Self);
+
+      View : Corner_Pair;
+
+   begin -- On_Redo_Clicked
+      Selection_State := No_Selection;
+      Cancel_Button.Set_Sensitive (False);
+      Selection_OK_Button.Set_Sensitive (False);
+      Current := Corner_Lists.Next (Current);
+      View := Corner_Lists.Element (Current);
+      Redo_Button.Set_Sensitive
+        (Corner_Lists.Has_Element (Corner_Lists.Next (Current)));
+      Undo_Button.Set_Sensitive (True);
+      Set_View (View.Bottom_Left, View.Top_Right);
+   end On_Redo_Clicked;
 
    procedure On_Cancel_Clicked (Self : access Gtk_Button_Record'Class) is
 
@@ -505,7 +546,8 @@ package body Mandelbrot_GUI is
          "Selection OK: zoom into the selected area." & ASCII.LF &
          "Cancel Selection: discard the current selection." & ASCII.LF &
          "Reset Selection: return to the full initial view." & ASCII.LF &
-         "Previous Selection: return to the previous view." & ASCII.LF &
+         "Undo: step back to the previous view." & ASCII.LF &
+         "Redo: step forward again after an Undo." & ASCII.LF &
          "Save as PNG...: save the current image, with the corner" &
          " coordinates embedded as metadata." & ASCII.LF & ASCII.LF &
          "Build date: " & GNAT.Source_Info.Compilation_ISO_Date &
@@ -523,6 +565,8 @@ package body Mandelbrot_GUI is
    begin -- Run
       Bottom_Left := Initial_Bottom_Left;
       Top_Right := Initial_Top_Right;
+      History.Append ((Bottom_Left, Top_Right));
+      Current := History.First;
 
       Surface := Create_For_Data_RGB24 (Pixel_Data, Gint (Image_Size),
                                          Gint (Image_Size));
@@ -541,9 +585,13 @@ package body Mandelbrot_GUI is
       Gtk_New (Reset_Button, "Reset Selection");
       Reset_Button.On_Clicked (On_Reset_Clicked'Access);
 
-      Gtk_New (Previous_Button, "Previous Selection");
-      Previous_Button.On_Clicked (On_Previous_Clicked'Access);
-      Previous_Button.Set_Sensitive (False);
+      Gtk_New (Undo_Button, "Undo");
+      Undo_Button.On_Clicked (On_Undo_Clicked'Access);
+      Undo_Button.Set_Sensitive (False);
+
+      Gtk_New (Redo_Button, "Redo");
+      Redo_Button.On_Clicked (On_Redo_Clicked'Access);
+      Redo_Button.Set_Sensitive (False);
 
       Gtk_New (Cancel_Button, "Cancel Selection");
       Cancel_Button.On_Clicked (On_Cancel_Clicked'Access);
@@ -563,7 +611,9 @@ package body Mandelbrot_GUI is
       Selection_Box.Pack_Start
         (Reset_Button, Expand => False, Fill => False);
       Selection_Box.Pack_Start
-        (Previous_Button, Expand => False, Fill => False);
+        (Undo_Button, Expand => False, Fill => False);
+      Selection_Box.Pack_Start
+        (Redo_Button, Expand => False, Fill => False);
       Selection_Box.Pack_Start
         (Cancel_Button, Expand => False, Fill => False);
       Selection_Box.Pack_Start
