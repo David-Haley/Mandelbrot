@@ -13,6 +13,7 @@
 with Ada.Text_IO;
 with Ada.Strings; use Ada.Strings;
 with Ada.Strings.Fixed;
+with GNAT.Source_Info;
 with System;
 with Calculation_Engine; use Calculation_Engine;
 with Interfaces; use Interfaces;
@@ -203,10 +204,7 @@ package body Mandelbrot_GUI is
       Corner_Label.Set_Text
         ("Bottom Left: (" & Format (Bottom_Left.Re) & ", " &
          Format (Bottom_Left.Im) & ")   Top Right: (" &
-         Format (Top_Right.Re) & ", " & Format (Top_Right.Im) & ")" &
-         ASCII.LF &
-         "Drag the left mouse button over the image to select an area." &
-         "  See Help for the buttons below.");
+         Format (Top_Right.Re) & ", " & Format (Top_Right.Im) & ")");
    end Update_Label;
 
    function Save_Pixbuf_With_Metadata
@@ -506,7 +504,10 @@ package body Mandelbrot_GUI is
          "Reset Selection: return to the full initial view." & ASCII.LF &
          "Previous Selection: return to the previous view." & ASCII.LF &
          "Save as PNG...: save the current image, with the corner" &
-         " coordinates embedded as metadata.");
+         " coordinates embedded as metadata." & ASCII.LF & ASCII.LF &
+         "Build date: " & GNAT.Source_Info.Compilation_ISO_Date &
+         ASCII.LF & ASCII.LF &
+         "Credits: David Haley and Claude (Anthropic).");
       Response := Dialog.Run;
       Dialog.Destroy;
    end On_Help_Clicked;
